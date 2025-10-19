@@ -1,272 +1,217 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Upgrade Highway</title>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Road Rules Junior</title>
   <style>
-    body { background: #05051a; margin: 0; }
-    #ui {
-      position:fixed; top:18px; left:50%; transform:translateX(-50%);
-      z-index:11; color:#fff; font-family:sans-serif; font-size:2em;
-      text-shadow:0 0 16px #6afc, 0 2px 8px #145;
-    }
+    body {margin:0; background:#d0eaf9;}
+    #scoreboard {position:fixed; left:20px; top:20px; z-index:10;
+      font:1.2em Arial, sans-serif; color:#1856e9;}
+    #message {position:fixed; top:60px; left:50%; transform:translateX(-50%);
+      font:1.6em Arial, sans-serif; color:#222; background:#fff4; border-radius:8px; padding:8px 18px; min-width:200px; text-align:center;}
     #restartBtn {
       position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
-      z-index:11; padding:14px 42px; font-size:1.16em; background:#6afc;
-      color:#222; border:none; border-radius:13px; box-shadow:0 0 22px #6afc8, 0 2px 12px #121b;
+      z-index:11; padding:12px 34px; font-size:1.1em; background:#58cd4d;
+      color:#fff; border:none; border-radius:9px; box-shadow:0 2px 16px #135b;
       cursor:pointer; display:none;
     }
-    #gameCanvas { display:block; margin: 0 auto; background: #120022; border-radius:14px;
-      box-shadow:0 0 44px #6afc, 0 0px 24px #191522; }
+    #gameCanvas {
+      display:block; margin:48px auto 0; background: #eaf2ff;
+      border-radius:16px; box-shadow: 0 0 40px #1856e944;
+    }
   </style>
 </head>
 <body>
-  <div id="ui">
-    <span>Miles: <span id="miles">0</span></span>
-    &nbsp;&nbsp;|&nbsp;&nbsp;
-    <span>Coins: <span id="coins">0</span></span>
+  <div id="scoreboard">
+    <span>Score: <span id="score">0</span></span>
+    &nbsp; | &nbsp;
+    <span>Level: <span id="level">1</span></span>
   </div>
+  <div id="message"></div>
   <button id="restartBtn">Restart</button>
-  <canvas id="gameCanvas" width="400" height="620"></canvas>
-  <script>
-    // ---- Configuration ----
-    const J = {
-      canvasW:400, canvasH:620,
-      laneYs:[200,320,440],
-      milesPerUpgrade:10,
-      carSprites:[
-        {color:'#AAA', glow:'#6afc', shape:'rect'}, // Beater
-        {color:'#18e', glow:'#4dfd', shape:'rect'}, // Sport
-        {color:'#ec0', glow:'#ff0', shape:'rect'}, // Hot Rod
-        {color:'#3df', glow:'#aefc', shape:'round'}, // Hover Car
-        {color:'#d5a', glow:'#f6a', shape:'blob'}, // Space Limo
-      ],
-      upgradeMsgs: [
-        "Pimped-out engine!", "Neon underglow!", "Turbo mode!", "Fancy paint job!", "Wings!", "Anti-grav tech unlocked!", "Rocket boosters!", "Limo stretch!", "Alien tech!", "???"
-      ]
-    };
-    // ---- State ----
-    let running = true, lane = 1, miles = 0, coins = 0, speed = 3.1, bgOffset=0, upgrades=0, nextUpgradeAt=J.milesPerUpgrade, coinWaveTimer=0, gameTick=0;
-    let player = { x:210, y:J.laneYs[lane], w:48, h:54, sprite:0 };
-    let objects = []; // Hazards & coins
+  <canvas id="gameCanvas" width="780" height="360"></canvas>
+<script>
+const W = 780, H = 360;
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const levelEl = document.getElementById('level');
+const messageEl = document.getElementById('message');
+const restartBtn = document.getElementById('restartBtn');
 
-    // ---- HTML ----
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    const milesEl=document.getElementById('miles'), coinsEl=document.getElementById('coins');
-    const restartBtn = document.getElementById('restartBtn');
+// --- Game State ---
+let carX, carY, carSpeed, carBlinker, score, level, run, waiting, stopType, wrongAction, timer, blinkerUsed;
+let roadItems = [];
 
-    // ---- Helper Drawing ----
-    function drawCar(p) {
-      ctx.save();
-      let s = J.carSprites[p.sprite % J.carSprites.length];
-      ctx.shadowColor = s.glow;
-      ctx.shadowBlur = 32;
-      ctx.globalAlpha = 0.96;
-      if(s.shape==='rect'){
-        ctx.fillStyle = s.color;
-        ctx.fillRect(p.x-22, p.y-26, p.w, p.h);
-        ctx.fillStyle = "#0009";
-        ctx.fillRect(p.x-16, p.y+6, 32, 8);
-        ctx.fillRect(p.x-14, p.y+14, 12,8);
-        ctx.fillRect(p.x+2, p.y+14, 12,8);
-      }
-      else if(s.shape==='round'){
-        ctx.beginPath();
-        ctx.ellipse(p.x, p.y, p.w/2, p.h/2, 0, 0, 2*Math.PI);
-        ctx.fillStyle = s.color;
-        ctx.fill();
-      }
-      else { // Blob
-        ctx.beginPath();
-        ctx.moveTo(p.x-22,p.y-18); ctx.quadraticCurveTo(p.x,p.y-40,p.x+22,p.y-18);
-        ctx.quadraticCurveTo(p.x+36,p.y+18,p.x,p.y+24);
-        ctx.quadraticCurveTo(p.x-36,p.y+18,p.x-22,p.y-18);
-        ctx.closePath();
-        ctx.fillStyle = s.color;
-        ctx.fill();
-      }
-      ctx.restore();
-      // Trail
-      if(upgrades>2){
-        ctx.save();
-        ctx.strokeStyle=s.glow;
-        ctx.globalAlpha=0.18+0.08*(upgrades);
-        ctx.beginPath();
-        ctx.moveTo(p.x,0);ctx.lineTo(p.x,p.y-20);
-        ctx.lineWidth=7+upgrades*2;
-        ctx.shadowBlur=32;
-        ctx.shadowColor=s.glow;
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
+// -- Helper: Draw Car (simple cartoon) --
+function drawCar(x, y, blinker) {
+  ctx.save();
+  // body
+  ctx.fillStyle = "#2584de";
+  ctx.fillRect(x-58, y-18, 72, 36);
+  // roof
+  ctx.fillStyle = "#1856e9";
+  ctx.fillRect(x-36, y-32, 42, 20);
+  // Wheels
+  ctx.beginPath(); ctx.arc(x-32, y+16, 9, 0, 2*Math.PI); ctx.arc(x+20, y+16, 9, 0, 2*Math.PI);
+  ctx.fillStyle = "#222"; ctx.fill();
+  // Windshield
+  ctx.fillStyle = "#eaf7fc"; ctx.fillRect(x-32, y-20, 40, 7);
+  // Headlights
+  ctx.beginPath(); ctx.arc(x+15, y-9, 6, 0, 2*Math.PI); ctx.arc(x+15, y+9, 6, 0, 2*Math.PI);
+  ctx.fillStyle="#ffd800"; ctx.fill();
+  // Blinkers
+  if (blinker=="right") {
+    ctx.beginPath(); ctx.arc(x+33, y-9, 4, 0, 2*Math.PI); ctx.arc(x+33, y+9, 4, 0, 2*Math.PI);
+    ctx.fillStyle="#ffb300"; ctx.fill();
+  }
+  if (blinker=="left") {
+    ctx.beginPath(); ctx.arc(x-62, y-9, 4, 0, 2*Math.PI); ctx.arc(x-62, y+9, 4, 0, 2*Math.PI);
+    ctx.fillStyle="#ffb300"; ctx.fill();
+  }
+  ctx.restore();
+}
 
-    function drawHazard(o){
+// -- Helper: Draw Stop Light --
+function drawTrafficLight(x, y, color) {
+  ctx.save();
+  ctx.fillStyle="#444"; ctx.fillRect(x-12,y-24,28,60);
+  ctx.beginPath();
+  ctx.arc(x+2, y-12, 8, 0, 2*Math.PI); ctx.fillStyle=color==="red"?"#db2323":"#960a0a"; ctx.fill();
+  ctx.arc(x+2, y+6, 8, 0, 2*Math.PI); ctx.fillStyle=color==="yellow"?"#ffd600":"#968300"; ctx.fill();
+  ctx.arc(x+2, y+24, 8, 0, 2*Math.PI); ctx.fillStyle=color==="green"?"#36c034":"#235d1c"; ctx.fill();
+  ctx.restore();
+}
+
+// --- Setup Level ---
+function setupLevel(lvl) {
+  carX=70; carY=H/2; carSpeed=0; carBlinker=null; score=score||0; run=true; waiting=false; stopType=null; wrongAction=""; timer=0; blinkerUsed=false;
+  roadItems = [
+    { type:"light", x:290, y:H/2-50, color: ["red","green","yellow"][Math.floor(Math.random()*3)] },
+    { type:"stopSign", x:510, y:H/2-50 }
+  ];
+  messageEl.textContent = "Drive! Arrow keys to move, <- or -> for blinkers before turns.";
+  level=lvl; levelEl.textContent=level;
+}
+
+// -- Game Loop --
+function gameLoop() {
+  ctx.clearRect(0,0,W,H);
+  // Road
+  ctx.save();
+  ctx.fillStyle="#5c6f76";
+  ctx.fillRect(0, H/2-44, W, 94);
+  for (let i=0;i<12;i++){
+    ctx.fillStyle="#fff";
+    ctx.fillRect(i*64+20, H/2-2, 38, 8);
+  }
+  ctx.restore();
+  // Crosswalks and intersections
+  ctx.save();
+  ctx.fillStyle="#eee";
+  ctx.fillRect(280, H/2-44, 12, 94);
+  ctx.fillRect(500, H/2-44, 12, 94);
+  ctx.restore();
+
+  // Roadside items
+  for (let itm of roadItems) {
+    if (itm.type=="light") drawTrafficLight(itm.x, itm.y, itm.color);
+    if (itm.type=="stopSign") {
       ctx.save();
-      ctx.shadowColor="#fd3";
-      ctx.shadowBlur=16;
-      ctx.beginPath();
-      ctx.arc(o.x,o.y,17,0,2*Math.PI);
-      ctx.fillStyle="#fd3";
-      ctx.globalAlpha=0.87;
-      ctx.fill();
-      ctx.restore();
-      // Lightning shape
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(o.x-8,o.y-9);ctx.lineTo(o.x-2,o.y+5); ctx.lineTo(o.x, o.y-1); ctx.lineTo(o.x+8,o.y+9);
-      ctx.strokeStyle='#fff';
-      ctx.shadowColor='#fff9';
-      ctx.shadowBlur=12;
-      ctx.lineWidth=2;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(itm.x, itm.y+44, 20, 0, 2*Math.PI); ctx.fillStyle="#de2222"; ctx.fill();
+      ctx.fillStyle="#fff"; ctx.font="bold 16px Arial"; ctx.textAlign="center";
+      ctx.fillText("STOP", itm.x, itm.y+50);
       ctx.restore();
     }
-    function drawCoin(o){
-      ctx.save();
-      ctx.shadowColor="#fc4";
-      ctx.shadowBlur=19;
-      ctx.beginPath();
-      ctx.arc(o.x,o.y,11,0,2*Math.PI);
-      ctx.fillStyle="#fc4";
-      ctx.globalAlpha=0.86;
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.font="bold 13px sans-serif";
-      ctx.fillStyle="#fff9";
-      ctx.fillText("¢",o.x-6,o.y+5);
-      ctx.restore();
-    }
+  }
 
-    // ---- Input ----
-    window.addEventListener('keydown', e=>{
-      if(!player.alive) return;
-      if(e.key==="ArrowLeft" && lane>0){ lane--; }
-      if(e.key==="ArrowRight" && lane<2){ lane++; }
-    });
-    canvas.addEventListener('touchstart', e=>{
-      if(!player.alive) return;
-      let x = e.touches[0].clientX - canvas.getBoundingClientRect().left;
-      if(x < player.x && lane>0) lane--;
-      else if(x > player.x && lane<2) lane++;
-    });
+  // Car
+  drawCar(carX, carY, carBlinker);
 
-    // ---- Utility ----
-    function rand(a,b){ return Math.random()*(b-a)+a; }
-
-    // ---- Game Loop ----
-    function gameLoop(){
-      if(!running) return;
-      ctx.clearRect(0,0,J.canvasW,J.canvasH);
-
-      // Road background
-      bgOffset += speed*1.3;
-      ctx.save();
-      for(let y=0; y<J.canvasH; y+=84){
-        ctx.fillStyle = `rgba(106,255,202,${.09 + 0.04*Math.sin((y+bgOffset)/44)})`;
-        ctx.fillRect(0, (y+bgOffset)%J.canvasH, J.canvasW, 54);
-      }
-      ctx.restore();
-
-      // Lane lines
-      ctx.save();
-      for (let i=1; i<3; i++) {
-        ctx.strokeStyle="#fff2"; ctx.lineWidth=3; ctx.beginPath();
-        ctx.setLineDash([22,22]);
-        ctx.moveTo(133*i,0); ctx.lineTo(133*i,J.canvasH);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // Objects (hazards and coins)
-      objects.forEach((o,i)=>{
-        o.y += speed + (o.type==="hazard"? 1.3 + upgrades*0.13 : 0);
-        if(o.type==="hazard") drawHazard(o);
-        if(o.type==="coin") drawCoin(o);
-
-        // Pickup coins
-        if(o.type==="coin" && Math.abs(o.x-player.x)<25 && Math.abs(o.y-player.y)<32){
-          coins++; objects.splice(i,1);
-        }
-        // Hit hazard
-        if(o.type==="hazard" && Math.abs(o.x-player.x)<28 && Math.abs(o.y-player.y)<32){
-          running=false; player.alive=false; restartBtn.style.display='block'; restartBtn.textContent='Restart';
-        }
-      });
-      // Remove passed hazards/coins
-      objects = objects.filter(o=>o.y<700);
-
-      // Car position
-      player.x += (66+lane*133-player.x)*0.32;
-      player.y = J.laneYs[lane];
-      player.alive = running;
-
-      // Draw car
-      drawCar(player);
-
-      // Miles
-      miles += speed/52;
-      milesEl.textContent = Math.floor(miles);
-      coinsEl.textContent = coins;
-
-      // Generate object waves
-      gameTick++;
-      if(gameTick%59==0){
-        // 1 in 2: hazard, 2 in 3: coins
-        let laneOrder = [0,1,2].sort(()=>Math.random()-.5);
-        for(let i=0;i<3;i++){
-          if(Math.random()<.35)
-            objects.push({type:'hazard',x:66+laneOrder[i]*133,y:-30});
-          else if(Math.random()<.92)
-            objects.push({type:'coin',x:66+laneOrder[i]*133,y:-28});
+  // Movement & rules
+  if (run) {
+    if (waiting) {
+      timer++;
+      if (timer>60 && stopType=="light" && wrongAction=="") {
+        if (roadItems[0].color=="green") {
+          messageEl.textContent="Great! You drove on green.";
+          score++; scoreEl.textContent=score;
+          waiting=false;
+        } else {
+          messageEl.textContent="Oops! Wait for green.";
+          run=false;
+          restartBtn.style.display="block";
         }
       }
-
-      // Upgrades!
-      if(miles>=nextUpgradeAt){
-        upgrades++;
-        nextUpgradeAt += J.milesPerUpgrade;
-        player.sprite = Math.min(upgrades, J.carSprites.length-1);
-        speed += 1.3 + 0.2*(upgrades);
-        // Fun upgrade message
-        ctx.save(); ctx.font="bold 2.1em sans-serif"; ctx.fillStyle="#6afc"; ctx.textAlign="center";
-        ctx.shadowColor="#6afc"; ctx.shadowBlur=8;
-        ctx.globalAlpha=0.87;
-        ctx.fillText(J.upgradeMsgs[upgrades%J.upgradeMsgs.length]||"??",J.canvasW/2,240);
-        ctx.restore();
-        // Mega glow "POP" effect
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(player.x,player.y,55+upgrades*9,0,2*Math.PI);
-        ctx.strokeStyle="#6afc";
-        ctx.globalAlpha=0.33;
-        ctx.lineWidth=7+upgrades*3;
-        ctx.shadowColor="#6afc";
-        ctx.shadowBlur=44;
-        ctx.stroke();
-        ctx.restore();
+      if (timer>60 && stopType=="stopSign" && wrongAction=="") {
+        messageEl.textContent="Nice stop at the sign!";
+        score++; scoreEl.textContent=score;
+        waiting=false;
       }
-
-      // Animate
-      if(running) requestAnimationFrame(gameLoop);
+    } else {
+      carSpeed = Math.min(carSpeed+0.15, 4);
+      carX += carSpeed;
+      // Traffic light stop
+      if (carX>roadItems[0].x-32 && carX<roadItems[0].x+32 && !waiting) {
+        stopType="light";
+        if (roadItems[0].color!="green") {
+          if (carSpeed>2) {
+            messageEl.textContent="Hit the brakes! Stop for red/yellow.";
+            run=false; restartBtn.style.display="block";
+            wrongAction="ranLight";
+          } else {
+            messageEl.textContent="Good! Waiting for green...";
+            waiting=true; timer=0;
+            carSpeed=0;
+          }
+        }
+      }
+      // Stop sign
+      if (carX>roadItems[1].x-26 && carX<roadItems[1].x+20 && !waiting) {
+        stopType="stopSign";
+        if (carSpeed>1.6) {
+          messageEl.textContent="Hit the brakes! Stop at the sign.";
+          run=false; restartBtn.style.display="block";
+          wrongAction="missedStop";
+        } else {
+          messageEl.textContent="Good! Waiting a moment...";
+          waiting=true; timer=0;
+          carSpeed=0;
+        }
+      }
     }
-
-    // ---- Start / Restart ----
-    function resetGame() {
-      lane=1; miles=0; coins=0; speed=3.1; bgOffset=0; upgrades=0;
-      nextUpgradeAt=J.milesPerUpgrade; gameTick=0;
-      player={x:210, y:J.laneYs[lane], w:48, h:54, sprite:0};
-      objects=[]; running=true; player.alive=true;
-      restartBtn.style.display='none';
-      gameLoop();
+    // End of road
+    if (carX>W-90) {
+      messageEl.textContent="Level Complete!";
+      score++; scoreEl.textContent=score;
+      run=false;
+      restartBtn.style.display="block";
     }
-    restartBtn.onclick=resetGame;
+  }
 
-    // ---- Go! ----
-    resetGame();
-  </script>
+  // Simple blinker check for turns (Arrow keys set status)
+  window.onkeydown = function(e){
+    if(e.key==="ArrowRight") carBlinker="right", blinkerUsed=true;
+    if(e.key==="ArrowLeft") carBlinker="left", blinkerUsed=true;
+    if(e.key==="ArrowUp"||e.key==="ArrowDown") carBlinker=null;
+  };
+
+  if(run) requestAnimationFrame(gameLoop);
+}
+
+// -- Restart/Next Level --
+function resetGame() {
+  setupLevel((level||1)+1);
+  scoreEl.textContent=score;
+  restartBtn.style.display="none";
+  gameLoop();
+}
+restartBtn.onclick = resetGame;
+
+// -- Start!
+setupLevel(1);
+gameLoop();
+</script>
 </body>
 </html>
