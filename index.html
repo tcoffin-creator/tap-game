@@ -2,148 +2,260 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Runner Rush</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dreamwave Rider</title>
   <style>
-    body { background: #222; margin: 0; }
-    #gameBox { background: #eee; width: 375px; height: 620px; margin: 24px auto; border-radius: 10px; position: relative; overflow: hidden; box-shadow: 0 6px 24px #3334; }
-    #player { position: absolute; bottom: 40px; left: 140px; width: 56px; height: 56px; background: #09c; border-radius: 30%; box-shadow: 0 4px 8px #09c4; display: flex; align-items: center; justify-content: center; font-size: 2.4em; color: #fff; transition: left 0.12s cubic-bezier(0.55,0.08,0.68,0.53); }
-    .obstacle { position: absolute; top: -64px; width: 48px; height: 48px; background: #f43; border-radius: 32% 48% 51% 38%; }
-    #score, #hiScore { text-align: center; font-size: 2em; margin: 12px 0; color: #fff; }
-    #startBtn { display: block; margin: 20px auto 0; padding: 14px 40px; font-size: 1em; border: none; border-radius: 7px; background: #444; color: #fff; cursor: pointer; }
-    #gameOver { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #222c; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 2em; z-index: 6; }
-    #muteBtn { position: absolute; bottom: 14px; left: 12px; background: #333; color: #fff; border-radius: 44%; padding: 8px; border: none; cursor: pointer; font-size: 1.2em;}
+    body { background: #10103a; margin: 0; overflow: hidden; }
+    #gameCanvas { display: block; margin: 0 auto; background: #0a0a23; border-radius: 12px; box-shadow: 0 0 100px #3af, 0 2px 24px #111b inset; }
+    #ui { position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:11; color:#fff; font-family:sans-serif; font-size:2em; text-shadow: 0 0 16px #3af9; }
+    #restartBtn { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); z-index:11; padding:14px 42px; font-size:1em; background:#3af; color:#fff; border:none; border-radius:9px; box-shadow:0 0 22px #49f8,0 2px 9px #111; cursor:pointer; display:none;}
   </style>
 </head>
 <body>
-  <div id="score">Score: 0</div>
-  <div id="hiScore">High Score: 0</div>
-  <button id="startBtn">Start Game</button>
-  <div id="gameBox"></div>
-  <audio id="scoreSound" src="https://assets.mixkit.co/sfx/download/mixkit-game-bonus-reached-2184.wav"></audio>
-  <audio id="hitSound" src="https://assets.mixkit.co/sfx/download/mixkit-player-losing-or-failing-2042.wav"></audio>
+  <div id="ui">Score: <span id="score">0</span></div>
+  <button id="restartBtn">Restart</button>
+  <canvas id="gameCanvas" width="375" height="600"></canvas>
   <script>
-    const gameBox = document.getElementById('gameBox');
-    const scoreDiv = document.getElementById('score');
-    const hiScoreDiv = document.getElementById('hiScore');
-    const scoreSound = document.getElementById('scoreSound');
-    const hitSound = document.getElementById('hitSound');
-    const startBtn = document.getElementById('startBtn');
-    let player, obstacles = [], score = 0, hiScore = 0, running = false, lane = 1, gameTimer, obstacleTimer, mute = false, gameOverScreen;
+    // Settings
+    const cw = 375, ch = 600;
 
-    function loadHighScore() {
-      hiScore = Number(localStorage.getItem('runner_hi')) || 0;
-      hiScoreDiv.textContent = 'High Score: ' + hiScore;
+    // Canvas setup
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // UI
+    const scoreEl = document.getElementById("score");
+    const restartBtn = document.getElementById("restartBtn");
+    let score = 0, running = true;
+
+    // Player
+    let player = {
+      x: cw/2, y: ch-90, radius: 24, color: "#fff", glow: "#3af", vx:0, targetX: cw/2, alive:true
+    };
+
+    // Obstacles
+    let obstacles = [];
+    let obstacleFreq = 90, obstacleTimer = 0;
+
+    // Wavy ground
+    function drawGround(offset) {
+      ctx.save();
+      ctx.beginPath();
+      for(let x=0; x<=cw; x+=4){
+        let y = Math.sin((x+offset)/32)+Math.sin((x+offset)/14)*2;
+        ctx.lineTo(x, ch-60 + y*12);
+      }
+      ctx.lineTo(cw,ch);
+      ctx.lineTo(0,ch);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(58,175,249,0.13)";
+      ctx.shadowColor = "#3af";
+      ctx.shadowBlur = 64;
+      ctx.fill();
+      ctx.restore();
+
+      // glowing line
+      ctx.save();
+      ctx.beginPath();
+      for(let x=0; x<=cw; x+=4){
+        let y = Math.sin((x+offset)/32)+Math.sin((x+offset)/14)*2;
+        ctx.lineTo(x, ch-60 + y*12);
+      }
+      ctx.strokeStyle = "#3af";
+      ctx.lineWidth = 3.7;
+      ctx.shadowBlur = 22;
+      ctx.shadowColor = "#3af";
+      ctx.stroke();
+      ctx.restore();
     }
 
-    function makePlayer() {
-      player = document.createElement('div');
-      player.id = 'player';
-      player.textContent = '🚶';
-      setLane(1);
-      gameBox.appendChild(player);
-    }
-    function setLane(to) {
-      lane = Math.max(0, Math.min(2, to));
-      player.style.left = (lane * 100 + 37) + 'px';
+    // Parallax Stars
+    let backgroundStars = Array.from({length:44}, () => ({
+      x: Math.random()*cw,
+      y: Math.random()*ch,
+      size: Math.random()*2.4+1,
+      speed: Math.random()*0.8+0.2,
+      glow: "#3af"
+    }));
+
+    function drawBackground() {
+      ctx.save();
+      ctx.clearRect(0,0,cw,ch);
+      backgroundStars.forEach(s=>{
+        ctx.save();
+        ctx.globalAlpha = 0.48;
+        ctx.shadowColor = s.glow;
+        ctx.shadowBlur = 22;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI*2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.restore();
+
+        s.y += s.speed;
+        if(s.y>ch) s.y=0;
+      });
+      ctx.restore();
     }
 
-    function newObstacle() {
-      const obs = document.createElement('div');
-      obs.className = 'obstacle';
-      obs.dataset.lane = Math.floor(Math.random()*3);
-      obs.style.left = (obs.dataset.lane*100 + 43) + 'px';
-      obs.style.top = '-50px';
-      gameBox.appendChild(obs);
-      obstacles.push(obs);
-    }
-
-    function moveObstacles() {
-      obstacles.forEach((obs, i) => {
-        let y = parseInt(obs.style.top) + 6;
-        obs.style.top = y + 'px';
-        if (y > 570) {
-          obs.remove();
-          obstacles.splice(i, 1);
-          score++;
-          scoreDiv.textContent = 'Score: ' + score;
-          if (!mute) scoreSound.play();
-          if (score > hiScore) {
-            hiScore = score;
-            localStorage.setItem('runner_hi', hiScore);
-            hiScoreDiv.textContent = 'High Score: ' + hiScore;
-          }
-        }
-        // Collision
-        if (y > 470 && Math.abs(lane - obs.dataset.lane) < 0.7 && y < 550) {
-          // Game Over
-          if (!mute) hitSound.play();
-          stopGame();
-        }
+    // Neon obstacles are shapes!
+    function makeObstacle(){
+      let shapes = ["rect","triangle","circle","diamond"];
+      let type = shapes[Math.floor(Math.random()*shapes.length)];
+      let lane = Math.floor(Math.random()*4);
+      let colors = ["#fd3","#f33","#9f3","#49f","#3af"];
+      let color = colors[Math.floor(Math.random()*colors.length)];
+      obstacles.push({
+        type,
+        color,
+        lane, // 0-3
+        x: 62 + lane*62,
+        y: -60,
+        size: Math.random()*14+32,
+        speed: Math.random()*0.8+2
       });
     }
 
-    function stopGame() {
-      running = false;
-      clearInterval(gameTimer);
-      clearInterval(obstacleTimer);
-      showGameOver();
+    function drawObstacle(o){
+      ctx.save();
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 12;
+      ctx.globalAlpha = 0.97;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = 3.2;
+      // rect
+      if(o.type=="rect"){
+        ctx.beginPath();
+        ctx.rect(o.x-o.size/2, o.y-o.size/2, o.size, o.size);
+        ctx.stroke();
+      }
+      // triangle
+      else if(o.type=="triangle"){
+        ctx.beginPath();
+        ctx.moveTo(o.x, o.y-o.size/2);
+        ctx.lineTo(o.x-o.size/2, o.y+o.size/2);
+        ctx.lineTo(o.x+o.size/2, o.y+o.size/2);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      // diamond
+      else if(o.type=="diamond"){
+        ctx.beginPath();
+        ctx.moveTo(o.x, o.y-o.size/2);
+        ctx.lineTo(o.x-o.size/2, o.y);
+        ctx.lineTo(o.x, o.y+o.size/2);
+        ctx.lineTo(o.x+o.size/2, o.y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      // circle
+      else {
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.size/2, 0, Math.PI*2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
-    function showGameOver() {
-      gameOverScreen = document.createElement('div');
-      gameOverScreen.id = 'gameOver';
-      gameOverScreen.innerHTML = `
-        <div>Game Over</div>
-        <div>Score: ${score}</div>
-        <button onclick="restartGame()">Restart</button>
-        <button id="muteBtn">${mute ? 'Unmute 🔊' : 'Mute 🔇' }</button>
-      `;
-      gameBox.appendChild(gameOverScreen);
-      document.getElementById('muteBtn').onclick = toggleMute;
+    // Draw and update player
+    function drawPlayer(){
+      ctx.save();
+      ctx.shadowColor = player.glow;
+      ctx.shadowBlur = 22;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
+      ctx.fillStyle = player.color;
+      ctx.globalAlpha = 0.97;
+      ctx.fill();
+      ctx.restore();
+      // Neon inner glow
+      ctx.save();
+      ctx.globalAlpha = 0.38;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.radius*0.7, 0, Math.PI*2);
+      ctx.fillStyle = player.glow;
+      ctx.shadowColor = player.glow;
+      ctx.shadowBlur = 42;
+      ctx.fill();
+      ctx.restore();
     }
 
-    function startGame() {
-      gameBox.innerHTML = '';
+    // Touch + Keyboard controls
+    function movePlayer(toLane){
+      let lanes = [62,124,186,248];
+      player.targetX = lanes[toLane];
+    }
+    window.addEventListener("keydown",e=>{
+      if(!player.alive) return;
+      let curLane = Math.round((player.x-62)/62);
+      if(e.key==="ArrowLeft" && curLane>0) movePlayer(curLane-1);
+      if(e.key==="ArrowRight" && curLane<3) movePlayer(curLane+1);
+    });
+
+    canvas.addEventListener("touchstart", e=>{
+      if(!player.alive) return;
+      let rect = canvas.getBoundingClientRect();
+      let x = e.touches[0].clientX - rect.left;
+      let curLane = Math.round((player.x-62)/62);
+      if(x<player.x && curLane>0) movePlayer(curLane-1);
+      else if(x>player.x && curLane<3) movePlayer(curLane+1);
+    });
+
+    // Game loop
+    let groundOffset = 0;
+    function gameLoop(){
+      if(!running) return;
+      drawBackground();
+      groundOffset += 5;
+      drawGround(groundOffset);
+
+      // Obstacles
+      obstacleTimer++;
+      if(obstacleTimer>obstacleFreq){
+        makeObstacle();
+        obstacleTimer=0;
+        obstacleFreq = Math.max(38, 90-~~(score/12));
+      }
+      obstacles.forEach(o=>{
+        o.y += o.speed;
+        drawObstacle(o);
+      });
+
+      // Remove passed obstacles
+      obstacles = obstacles.filter(o=>o.y<ch+32);
+
+      // Move & draw player
+      player.x += (player.targetX-player.x)*0.28;
+      drawPlayer();
+
+      // Collision
+      obstacles.forEach(o=>{
+        let d = Math.hypot(player.x-o.x, player.y-o.y);
+        if(d<player.radius+o.size/2-8 && o.y>player.y-30 && player.alive){
+          player.alive = false; running = false;
+          restartBtn.style.display='block';
+          restartBtn.textContent='Restart';
+        }
+      });
+
+      // Score
+      let passed = obstacles.filter(o=>o.y>player.y+player.radius);
+      score = passed.length;
+      scoreEl.textContent = score;
+      if(player.alive) requestAnimationFrame(gameLoop);
+    }
+    // Restart handler
+    restartBtn.onclick = ()=>{
+      player = { x: cw/2, y: ch-90, radius: 24, color: "#fff", glow: "#3af", vx:0, targetX: cw/2, alive:true };
       obstacles = [];
       score = 0;
-      scoreDiv.textContent = 'Score: 0';
       running = true;
-      makePlayer();
-      gameTimer = setInterval(() => {
-        moveObstacles();
-      }, 24);
-      obstacleTimer = setInterval(() => {
-        newObstacle();
-      }, 600);
-    }
-
-    function restartGame() {
-      gameOverScreen.remove();
-      startGame();
-    }
-
-    function toggleMute() {
-      mute = !mute;
-      document.getElementById('muteBtn').textContent = mute ? 'Unmute 🔊' : 'Mute 🔇';
-    }
-
-    startBtn.onclick = () => {
-      startBtn.style.display = 'none';
-      startGame();
+      obstacleFreq = 90, obstacleTimer = 0;
+      restartBtn.style.display='none';
+      gameLoop();
     };
-    window.addEventListener('keydown', e => {
-      if (!running) return;
-      if (e.key === 'ArrowLeft') setLane(lane - 1);
-      if (e.key === 'ArrowRight') setLane(lane + 1);
-    });
-    gameBox.addEventListener('touchstart', e => {
-      if (!running) return;
-      const x = e.touches[0].clientX - gameBox.getBoundingClientRect().left;
-      if (x < 150) setLane(lane - 1);
-      else if (x > 220) setLane(lane + 1);
-    });
-    loadHighScore();
+    // Start!
+    gameLoop();
   </script>
 </body>
 </html>
