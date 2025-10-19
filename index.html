@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tap Game</title>
+  <style>
+    body { margin: 0; background: #222; }
+    .game-area { position: relative; width: 400px; height: 600px; margin: 20px auto; background: #fff; overflow: hidden; border-radius: 10px; }
+    #target { width: 70px; height: 70px; border-radius: 50%; background: #28a745; position: absolute; top: 50px; left: 50px; cursor: pointer; transition: top 0.2s, left 0.2s; display: flex; align-items: center; justify-content: center; color: white; font-size: 2em; user-select: none; }
+    .score{ text-align: center; color: #fff; font-size: 2em; margin-top: 10px; }
+    .controls { text-align: center; margin-top: 15px; }
+    button { padding: 10px 30px; border-radius: 5px; border: none; font-size: 1em; margin: 0 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="score">Score: <span id="score">0</span></div>
+  <div class="controls">
+    <button onclick="startGame('easy')">Easy</button>
+    <button onclick="startGame('medium')">Medium</button>
+    <button onclick="startGame('hard')">Hard</button>
+    <button onclick="restartGame()">Restart</button>
+  </div>
+  <div class="game-area">
+    <div id="target">🎯</div>
+  </div>
+  <script>
+    let score = 0;
+    let speed = 1200;
+    let moveInterval;
+    const gameArea = document.querySelector('.game-area');
+    const target = document.getElementById('target');
+    const scoreEl = document.getElementById('score');
+
+    function randomPos() {
+      const maxX = gameArea.offsetWidth - target.offsetWidth;
+      const maxY = gameArea.offsetHeight - target.offsetHeight;
+      return {
+        x: Math.floor(Math.random()*maxX),
+        y: Math.floor(Math.random()*maxY)
+      };
+    }
+
+    function moveTarget() {
+      const pos = randomPos();
+      target.style.left = pos.x + 'px';
+      target.style.top = pos.y + 'px';
+    }
+
+    target.onclick = function() {
+      score += 1;
+      scoreEl.textContent = score;
+      moveTarget();
+    };
+
+    function startGame(level) {
+      if (moveInterval) clearInterval(moveInterval);
+      // Set speed
+      if (level==='easy') speed = 1200;
+      else if (level==='medium') speed = 800;
+      else speed = 450;
+      moveInterval = setInterval(moveTarget, speed);
+      score = 0;
+      scoreEl.textContent = 0;
+      moveTarget();
+    }
+    function restartGame() {
+      if (moveInterval) clearInterval(moveInterval);
+      score = 0;
+      scoreEl.textContent = 0;
+      target.style.left = '50px';
+      target.style.top = '50px';
+    }
+    // Initial state: target is ready to tap
+  </script>
+</body>
+</html>
