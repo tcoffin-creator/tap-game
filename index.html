@@ -2,260 +2,271 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dreamwave Rider</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Upgrade Highway</title>
   <style>
-    body { background: #10103a; margin: 0; overflow: hidden; }
-    #gameCanvas { display: block; margin: 0 auto; background: #0a0a23; border-radius: 12px; box-shadow: 0 0 100px #3af, 0 2px 24px #111b inset; }
-    #ui { position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:11; color:#fff; font-family:sans-serif; font-size:2em; text-shadow: 0 0 16px #3af9; }
-    #restartBtn { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); z-index:11; padding:14px 42px; font-size:1em; background:#3af; color:#fff; border:none; border-radius:9px; box-shadow:0 0 22px #49f8,0 2px 9px #111; cursor:pointer; display:none;}
+    body { background: #05051a; margin: 0; }
+    #ui {
+      position:fixed; top:18px; left:50%; transform:translateX(-50%);
+      z-index:11; color:#fff; font-family:sans-serif; font-size:2em;
+      text-shadow:0 0 16px #6afc, 0 2px 8px #145;
+    }
+    #restartBtn {
+      position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
+      z-index:11; padding:14px 42px; font-size:1.16em; background:#6afc;
+      color:#222; border:none; border-radius:13px; box-shadow:0 0 22px #6afc8, 0 2px 12px #121b;
+      cursor:pointer; display:none;
+    }
+    #gameCanvas { display:block; margin: 0 auto; background: #120022; border-radius:14px;
+      box-shadow:0 0 44px #6afc, 0 0px 24px #191522; }
   </style>
 </head>
 <body>
-  <div id="ui">Score: <span id="score">0</span></div>
+  <div id="ui">
+    <span>Miles: <span id="miles">0</span></span>
+    &nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Coins: <span id="coins">0</span></span>
+  </div>
   <button id="restartBtn">Restart</button>
-  <canvas id="gameCanvas" width="375" height="600"></canvas>
+  <canvas id="gameCanvas" width="400" height="620"></canvas>
   <script>
-    // Settings
-    const cw = 375, ch = 600;
-
-    // Canvas setup
-    const canvas = document.getElementById("gameCanvas");
-    const ctx = canvas.getContext("2d");
-
-    // UI
-    const scoreEl = document.getElementById("score");
-    const restartBtn = document.getElementById("restartBtn");
-    let score = 0, running = true;
-
-    // Player
-    let player = {
-      x: cw/2, y: ch-90, radius: 24, color: "#fff", glow: "#3af", vx:0, targetX: cw/2, alive:true
+    // ---- Configuration ----
+    const J = {
+      canvasW:400, canvasH:620,
+      laneYs:[200,320,440],
+      milesPerUpgrade:10,
+      carSprites:[
+        {color:'#AAA', glow:'#6afc', shape:'rect'}, // Beater
+        {color:'#18e', glow:'#4dfd', shape:'rect'}, // Sport
+        {color:'#ec0', glow:'#ff0', shape:'rect'}, // Hot Rod
+        {color:'#3df', glow:'#aefc', shape:'round'}, // Hover Car
+        {color:'#d5a', glow:'#f6a', shape:'blob'}, // Space Limo
+      ],
+      upgradeMsgs: [
+        "Pimped-out engine!", "Neon underglow!", "Turbo mode!", "Fancy paint job!", "Wings!", "Anti-grav tech unlocked!", "Rocket boosters!", "Limo stretch!", "Alien tech!", "???"
+      ]
     };
+    // ---- State ----
+    let running = true, lane = 1, miles = 0, coins = 0, speed = 3.1, bgOffset=0, upgrades=0, nextUpgradeAt=J.milesPerUpgrade, coinWaveTimer=0, gameTick=0;
+    let player = { x:210, y:J.laneYs[lane], w:48, h:54, sprite:0 };
+    let objects = []; // Hazards & coins
 
-    // Obstacles
-    let obstacles = [];
-    let obstacleFreq = 90, obstacleTimer = 0;
+    // ---- HTML ----
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const milesEl=document.getElementById('miles'), coinsEl=document.getElementById('coins');
+    const restartBtn = document.getElementById('restartBtn');
 
-    // Wavy ground
-    function drawGround(offset) {
+    // ---- Helper Drawing ----
+    function drawCar(p) {
       ctx.save();
-      ctx.beginPath();
-      for(let x=0; x<=cw; x+=4){
-        let y = Math.sin((x+offset)/32)+Math.sin((x+offset)/14)*2;
-        ctx.lineTo(x, ch-60 + y*12);
+      let s = J.carSprites[p.sprite % J.carSprites.length];
+      ctx.shadowColor = s.glow;
+      ctx.shadowBlur = 32;
+      ctx.globalAlpha = 0.96;
+      if(s.shape==='rect'){
+        ctx.fillStyle = s.color;
+        ctx.fillRect(p.x-22, p.y-26, p.w, p.h);
+        ctx.fillStyle = "#0009";
+        ctx.fillRect(p.x-16, p.y+6, 32, 8);
+        ctx.fillRect(p.x-14, p.y+14, 12,8);
+        ctx.fillRect(p.x+2, p.y+14, 12,8);
       }
-      ctx.lineTo(cw,ch);
-      ctx.lineTo(0,ch);
-      ctx.closePath();
-      ctx.fillStyle = "rgba(58,175,249,0.13)";
-      ctx.shadowColor = "#3af";
-      ctx.shadowBlur = 64;
+      else if(s.shape==='round'){
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.w/2, p.h/2, 0, 0, 2*Math.PI);
+        ctx.fillStyle = s.color;
+        ctx.fill();
+      }
+      else { // Blob
+        ctx.beginPath();
+        ctx.moveTo(p.x-22,p.y-18); ctx.quadraticCurveTo(p.x,p.y-40,p.x+22,p.y-18);
+        ctx.quadraticCurveTo(p.x+36,p.y+18,p.x,p.y+24);
+        ctx.quadraticCurveTo(p.x-36,p.y+18,p.x-22,p.y-18);
+        ctx.closePath();
+        ctx.fillStyle = s.color;
+        ctx.fill();
+      }
+      ctx.restore();
+      // Trail
+      if(upgrades>2){
+        ctx.save();
+        ctx.strokeStyle=s.glow;
+        ctx.globalAlpha=0.18+0.08*(upgrades);
+        ctx.beginPath();
+        ctx.moveTo(p.x,0);ctx.lineTo(p.x,p.y-20);
+        ctx.lineWidth=7+upgrades*2;
+        ctx.shadowBlur=32;
+        ctx.shadowColor=s.glow;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    function drawHazard(o){
+      ctx.save();
+      ctx.shadowColor="#fd3";
+      ctx.shadowBlur=16;
+      ctx.beginPath();
+      ctx.arc(o.x,o.y,17,0,2*Math.PI);
+      ctx.fillStyle="#fd3";
+      ctx.globalAlpha=0.87;
       ctx.fill();
       ctx.restore();
-
-      // glowing line
+      // Lightning shape
       ctx.save();
       ctx.beginPath();
-      for(let x=0; x<=cw; x+=4){
-        let y = Math.sin((x+offset)/32)+Math.sin((x+offset)/14)*2;
-        ctx.lineTo(x, ch-60 + y*12);
-      }
-      ctx.strokeStyle = "#3af";
-      ctx.lineWidth = 3.7;
-      ctx.shadowBlur = 22;
-      ctx.shadowColor = "#3af";
+      ctx.moveTo(o.x-8,o.y-9);ctx.lineTo(o.x-2,o.y+5); ctx.lineTo(o.x, o.y-1); ctx.lineTo(o.x+8,o.y+9);
+      ctx.strokeStyle='#fff';
+      ctx.shadowColor='#fff9';
+      ctx.shadowBlur=12;
+      ctx.lineWidth=2;
       ctx.stroke();
       ctx.restore();
     }
-
-    // Parallax Stars
-    let backgroundStars = Array.from({length:44}, () => ({
-      x: Math.random()*cw,
-      y: Math.random()*ch,
-      size: Math.random()*2.4+1,
-      speed: Math.random()*0.8+0.2,
-      glow: "#3af"
-    }));
-
-    function drawBackground() {
+    function drawCoin(o){
       ctx.save();
-      ctx.clearRect(0,0,cw,ch);
-      backgroundStars.forEach(s=>{
-        ctx.save();
-        ctx.globalAlpha = 0.48;
-        ctx.shadowColor = s.glow;
-        ctx.shadowBlur = 22;
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, s.size, 0, Math.PI*2);
-        ctx.fillStyle = "#fff";
-        ctx.fill();
-        ctx.restore();
-
-        s.y += s.speed;
-        if(s.y>ch) s.y=0;
-      });
-      ctx.restore();
-    }
-
-    // Neon obstacles are shapes!
-    function makeObstacle(){
-      let shapes = ["rect","triangle","circle","diamond"];
-      let type = shapes[Math.floor(Math.random()*shapes.length)];
-      let lane = Math.floor(Math.random()*4);
-      let colors = ["#fd3","#f33","#9f3","#49f","#3af"];
-      let color = colors[Math.floor(Math.random()*colors.length)];
-      obstacles.push({
-        type,
-        color,
-        lane, // 0-3
-        x: 62 + lane*62,
-        y: -60,
-        size: Math.random()*14+32,
-        speed: Math.random()*0.8+2
-      });
-    }
-
-    function drawObstacle(o){
-      ctx.save();
-      ctx.shadowColor = o.color;
-      ctx.shadowBlur = 12;
-      ctx.globalAlpha = 0.97;
-      ctx.strokeStyle = o.color;
-      ctx.lineWidth = 3.2;
-      // rect
-      if(o.type=="rect"){
-        ctx.beginPath();
-        ctx.rect(o.x-o.size/2, o.y-o.size/2, o.size, o.size);
-        ctx.stroke();
-      }
-      // triangle
-      else if(o.type=="triangle"){
-        ctx.beginPath();
-        ctx.moveTo(o.x, o.y-o.size/2);
-        ctx.lineTo(o.x-o.size/2, o.y+o.size/2);
-        ctx.lineTo(o.x+o.size/2, o.y+o.size/2);
-        ctx.closePath();
-        ctx.stroke();
-      }
-      // diamond
-      else if(o.type=="diamond"){
-        ctx.beginPath();
-        ctx.moveTo(o.x, o.y-o.size/2);
-        ctx.lineTo(o.x-o.size/2, o.y);
-        ctx.lineTo(o.x, o.y+o.size/2);
-        ctx.lineTo(o.x+o.size/2, o.y);
-        ctx.closePath();
-        ctx.stroke();
-      }
-      // circle
-      else {
-        ctx.beginPath();
-        ctx.arc(o.x, o.y, o.size/2, 0, Math.PI*2);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    // Draw and update player
-    function drawPlayer(){
-      ctx.save();
-      ctx.shadowColor = player.glow;
-      ctx.shadowBlur = 22;
+      ctx.shadowColor="#fc4";
+      ctx.shadowBlur=19;
       ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
-      ctx.fillStyle = player.color;
-      ctx.globalAlpha = 0.97;
+      ctx.arc(o.x,o.y,11,0,2*Math.PI);
+      ctx.fillStyle="#fc4";
+      ctx.globalAlpha=0.86;
       ctx.fill();
       ctx.restore();
-      // Neon inner glow
       ctx.save();
-      ctx.globalAlpha = 0.38;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius*0.7, 0, Math.PI*2);
-      ctx.fillStyle = player.glow;
-      ctx.shadowColor = player.glow;
-      ctx.shadowBlur = 42;
-      ctx.fill();
+      ctx.font="bold 13px sans-serif";
+      ctx.fillStyle="#fff9";
+      ctx.fillText("¢",o.x-6,o.y+5);
       ctx.restore();
     }
 
-    // Touch + Keyboard controls
-    function movePlayer(toLane){
-      let lanes = [62,124,186,248];
-      player.targetX = lanes[toLane];
-    }
-    window.addEventListener("keydown",e=>{
+    // ---- Input ----
+    window.addEventListener('keydown', e=>{
       if(!player.alive) return;
-      let curLane = Math.round((player.x-62)/62);
-      if(e.key==="ArrowLeft" && curLane>0) movePlayer(curLane-1);
-      if(e.key==="ArrowRight" && curLane<3) movePlayer(curLane+1);
+      if(e.key==="ArrowLeft" && lane>0){ lane--; }
+      if(e.key==="ArrowRight" && lane<2){ lane++; }
+    });
+    canvas.addEventListener('touchstart', e=>{
+      if(!player.alive) return;
+      let x = e.touches[0].clientX - canvas.getBoundingClientRect().left;
+      if(x < player.x && lane>0) lane--;
+      else if(x > player.x && lane<2) lane++;
     });
 
-    canvas.addEventListener("touchstart", e=>{
-      if(!player.alive) return;
-      let rect = canvas.getBoundingClientRect();
-      let x = e.touches[0].clientX - rect.left;
-      let curLane = Math.round((player.x-62)/62);
-      if(x<player.x && curLane>0) movePlayer(curLane-1);
-      else if(x>player.x && curLane<3) movePlayer(curLane+1);
-    });
+    // ---- Utility ----
+    function rand(a,b){ return Math.random()*(b-a)+a; }
 
-    // Game loop
-    let groundOffset = 0;
+    // ---- Game Loop ----
     function gameLoop(){
       if(!running) return;
-      drawBackground();
-      groundOffset += 5;
-      drawGround(groundOffset);
+      ctx.clearRect(0,0,J.canvasW,J.canvasH);
 
-      // Obstacles
-      obstacleTimer++;
-      if(obstacleTimer>obstacleFreq){
-        makeObstacle();
-        obstacleTimer=0;
-        obstacleFreq = Math.max(38, 90-~~(score/12));
+      // Road background
+      bgOffset += speed*1.3;
+      ctx.save();
+      for(let y=0; y<J.canvasH; y+=84){
+        ctx.fillStyle = `rgba(106,255,202,${.09 + 0.04*Math.sin((y+bgOffset)/44)})`;
+        ctx.fillRect(0, (y+bgOffset)%J.canvasH, J.canvasW, 54);
       }
-      obstacles.forEach(o=>{
-        o.y += o.speed;
-        drawObstacle(o);
-      });
+      ctx.restore();
 
-      // Remove passed obstacles
-      obstacles = obstacles.filter(o=>o.y<ch+32);
+      // Lane lines
+      ctx.save();
+      for (let i=1; i<3; i++) {
+        ctx.strokeStyle="#fff2"; ctx.lineWidth=3; ctx.beginPath();
+        ctx.setLineDash([22,22]);
+        ctx.moveTo(133*i,0); ctx.lineTo(133*i,J.canvasH);
+        ctx.stroke();
+      }
+      ctx.restore();
 
-      // Move & draw player
-      player.x += (player.targetX-player.x)*0.28;
-      drawPlayer();
+      // Objects (hazards and coins)
+      objects.forEach((o,i)=>{
+        o.y += speed + (o.type==="hazard"? 1.3 + upgrades*0.13 : 0);
+        if(o.type==="hazard") drawHazard(o);
+        if(o.type==="coin") drawCoin(o);
 
-      // Collision
-      obstacles.forEach(o=>{
-        let d = Math.hypot(player.x-o.x, player.y-o.y);
-        if(d<player.radius+o.size/2-8 && o.y>player.y-30 && player.alive){
-          player.alive = false; running = false;
-          restartBtn.style.display='block';
-          restartBtn.textContent='Restart';
+        // Pickup coins
+        if(o.type==="coin" && Math.abs(o.x-player.x)<25 && Math.abs(o.y-player.y)<32){
+          coins++; objects.splice(i,1);
+        }
+        // Hit hazard
+        if(o.type==="hazard" && Math.abs(o.x-player.x)<28 && Math.abs(o.y-player.y)<32){
+          running=false; player.alive=false; restartBtn.style.display='block'; restartBtn.textContent='Restart';
         }
       });
+      // Remove passed hazards/coins
+      objects = objects.filter(o=>o.y<700);
 
-      // Score
-      let passed = obstacles.filter(o=>o.y>player.y+player.radius);
-      score = passed.length;
-      scoreEl.textContent = score;
-      if(player.alive) requestAnimationFrame(gameLoop);
+      // Car position
+      player.x += (66+lane*133-player.x)*0.32;
+      player.y = J.laneYs[lane];
+      player.alive = running;
+
+      // Draw car
+      drawCar(player);
+
+      // Miles
+      miles += speed/52;
+      milesEl.textContent = Math.floor(miles);
+      coinsEl.textContent = coins;
+
+      // Generate object waves
+      gameTick++;
+      if(gameTick%59==0){
+        // 1 in 2: hazard, 2 in 3: coins
+        let laneOrder = [0,1,2].sort(()=>Math.random()-.5);
+        for(let i=0;i<3;i++){
+          if(Math.random()<.35)
+            objects.push({type:'hazard',x:66+laneOrder[i]*133,y:-30});
+          else if(Math.random()<.92)
+            objects.push({type:'coin',x:66+laneOrder[i]*133,y:-28});
+        }
+      }
+
+      // Upgrades!
+      if(miles>=nextUpgradeAt){
+        upgrades++;
+        nextUpgradeAt += J.milesPerUpgrade;
+        player.sprite = Math.min(upgrades, J.carSprites.length-1);
+        speed += 1.3 + 0.2*(upgrades);
+        // Fun upgrade message
+        ctx.save(); ctx.font="bold 2.1em sans-serif"; ctx.fillStyle="#6afc"; ctx.textAlign="center";
+        ctx.shadowColor="#6afc"; ctx.shadowBlur=8;
+        ctx.globalAlpha=0.87;
+        ctx.fillText(J.upgradeMsgs[upgrades%J.upgradeMsgs.length]||"??",J.canvasW/2,240);
+        ctx.restore();
+        // Mega glow "POP" effect
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(player.x,player.y,55+upgrades*9,0,2*Math.PI);
+        ctx.strokeStyle="#6afc";
+        ctx.globalAlpha=0.33;
+        ctx.lineWidth=7+upgrades*3;
+        ctx.shadowColor="#6afc";
+        ctx.shadowBlur=44;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Animate
+      if(running) requestAnimationFrame(gameLoop);
     }
-    // Restart handler
-    restartBtn.onclick = ()=>{
-      player = { x: cw/2, y: ch-90, radius: 24, color: "#fff", glow: "#3af", vx:0, targetX: cw/2, alive:true };
-      obstacles = [];
-      score = 0;
-      running = true;
-      obstacleFreq = 90, obstacleTimer = 0;
+
+    // ---- Start / Restart ----
+    function resetGame() {
+      lane=1; miles=0; coins=0; speed=3.1; bgOffset=0; upgrades=0;
+      nextUpgradeAt=J.milesPerUpgrade; gameTick=0;
+      player={x:210, y:J.laneYs[lane], w:48, h:54, sprite:0};
+      objects=[]; running=true; player.alive=true;
       restartBtn.style.display='none';
       gameLoop();
-    };
-    // Start!
-    gameLoop();
+    }
+    restartBtn.onclick=resetGame;
+
+    // ---- Go! ----
+    resetGame();
   </script>
 </body>
 </html>
