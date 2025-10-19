@@ -3,23 +3,27 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Road Rules Junior</title>
+  <title>Road Rules Realism</title>
   <style>
-    body {margin:0; background:#d0eaf9;}
-    #scoreboard {position:fixed; left:20px; top:20px; z-index:10;
-      font:1.2em Arial, sans-serif; color:#1856e9;}
-    #message {position:fixed; top:60px; left:50%; transform:translateX(-50%);
-      font:1.6em Arial, sans-serif; color:#222; background:#fff4; border-radius:8px; padding:8px 18px; min-width:200px; text-align:center;}
-    #restartBtn {
-      position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
-      z-index:11; padding:12px 34px; font-size:1.1em; background:#58cd4d;
-      color:#fff; border:none; border-radius:9px; box-shadow:0 2px 16px #135b;
-      cursor:pointer; display:none;
+    body {margin:0; background:#222;}
+    #scoreboard {
+      position:fixed; left:30px; top:24px; z-index:10;
+      font:1.25em Arial,sans-serif; color:#1856e9;}
+    #message {
+      position:fixed; top:72px; left:50%; transform:translateX(-50%);
+      font:1.2em Arial, sans-serif; color:#222; background:#fff7; border-radius:8px; padding:12px 22px; min-width:300px; text-align:center;}
+    #controls {
+      position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+      display: flex; gap: 30px; z-index:12;
     }
-    #gameCanvas {
-      display:block; margin:48px auto 0; background: #eaf2ff;
-      border-radius:16px; box-shadow: 0 0 40px #1856e944;
+    .btn-control {
+      background:#eef; border:2px solid #338fdc; border-radius:12px; font-size:1.25em;
+      width:84px; height:58px; box-shadow:0 2px 14px #adc5f7b8;
+      display:flex; align-items:center; justify-content:center; cursor:pointer;
+      user-select:none; transition:.13s background;
     }
+    .btn-control:active { background:#a2e0ff;}
+    #gameCanvas { display: block; margin: 60px auto 0; border-radius:14px; box-shadow:0 0 40px #1856e944;}
   </style>
 </head>
 <body>
@@ -29,187 +33,194 @@
     <span>Level: <span id="level">1</span></span>
   </div>
   <div id="message"></div>
-  <button id="restartBtn">Restart</button>
-  <canvas id="gameCanvas" width="780" height="360"></canvas>
+  <canvas id="gameCanvas" width="1200" height="560"></canvas>
+  <div id="controls">
+    <div class="btn-control" id="btn-left">&#8592;<br>Left</div>
+    <div class="btn-control" id="btn-blinker-left">&#128994;<br>Left<br>Blinker</div>
+    <div class="btn-control" id="btn-gas">&#128663;<br>Gas</div>
+    <div class="btn-control" id="btn-brake">&#128721;<br>Brake</div>
+    <div class="btn-control" id="btn-blinker-right">&#128994;<br>Right<br>Blinker</div>
+    <div class="btn-control" id="btn-right">&#8594;<br>Right</div>
+  </div>
 <script>
-const W = 780, H = 360;
+const W = 1200, H = 560;
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+
+// --- Assets ---
+const carImg = new Image(); carImg.src = "car_sprite.png"; // Use your AI-generated car
+const bgImg = new Image(); bgImg.src = "city_bg.png"; // Use your AI-generated background
+
+// --- Game State ---
+let carX, carY, carSpeed, carMaxSpeed, carBlinker, carTargetLane, score, level, run, wait, stopType, wrongAction, timer, blinkerUsed;
+let roads = [H/2-72, H/2, H/2+72];
+let roadItems = [];
+
+// --- UI ---
+const controls = {
+  left:document.getElementById("btn-left"),
+  right:document.getElementById("btn-right"),
+  gas:document.getElementById("btn-gas"),
+  brake:document.getElementById("btn-brake"),
+  blinkerLeft:document.getElementById("btn-blinker-left"),
+  blinkerRight:document.getElementById("btn-blinker-right")
+};
 const scoreEl = document.getElementById('score');
 const levelEl = document.getElementById('level');
 const messageEl = document.getElementById('message');
-const restartBtn = document.getElementById('restartBtn');
 
-// --- Game State ---
-let carX, carY, carSpeed, carBlinker, score, level, run, waiting, stopType, wrongAction, timer, blinkerUsed;
-let roadItems = [];
-
-// -- Helper: Draw Car (simple cartoon) --
-function drawCar(x, y, blinker) {
+// --- Helper functions ---
+function drawBackground() {
+  if(bgImg.complete) ctx.drawImage(bgImg, 0, 0, W, H);
+  else {
+    ctx.fillStyle="#cde8fe"; ctx.fillRect(0,0,W,H);
+  }
+}
+// Draw the car
+function drawCar(x, y) {
+  if(carImg.complete) ctx.drawImage(carImg, x-76, y-34, 152, 68);
+  else {
+    ctx.fillStyle="#1856e9";
+    ctx.fillRect(x-58, y-18, 86, 36);
+  }
+}
+// Blinker overlay
+function drawBlinker(x, y, dir) {
   ctx.save();
-  // body
-  ctx.fillStyle = "#2584de";
-  ctx.fillRect(x-58, y-18, 72, 36);
-  // roof
-  ctx.fillStyle = "#1856e9";
-  ctx.fillRect(x-36, y-32, 42, 20);
-  // Wheels
-  ctx.beginPath(); ctx.arc(x-32, y+16, 9, 0, 2*Math.PI); ctx.arc(x+20, y+16, 9, 0, 2*Math.PI);
-  ctx.fillStyle = "#222"; ctx.fill();
-  // Windshield
-  ctx.fillStyle = "#eaf7fc"; ctx.fillRect(x-32, y-20, 40, 7);
-  // Headlights
-  ctx.beginPath(); ctx.arc(x+15, y-9, 6, 0, 2*Math.PI); ctx.arc(x+15, y+9, 6, 0, 2*Math.PI);
-  ctx.fillStyle="#ffd800"; ctx.fill();
-  // Blinkers
-  if (blinker=="right") {
-    ctx.beginPath(); ctx.arc(x+33, y-9, 4, 0, 2*Math.PI); ctx.arc(x+33, y+9, 4, 0, 2*Math.PI);
-    ctx.fillStyle="#ffb300"; ctx.fill();
-  }
-  if (blinker=="left") {
-    ctx.beginPath(); ctx.arc(x-62, y-9, 4, 0, 2*Math.PI); ctx.arc(x-62, y+9, 4, 0, 2*Math.PI);
-    ctx.fillStyle="#ffb300"; ctx.fill();
-  }
+  ctx.globalAlpha = 0.76 + 0.1*Math.sin(Date.now()/140);
+  ctx.fillStyle="#ffec78";
+  if(dir==="left") ctx.beginPath(), ctx.arc(x-68,y,18,0,2*Math.PI), ctx.fill();
+  if(dir==="right") ctx.beginPath(), ctx.arc(x+68,y,18,0,2*Math.PI), ctx.fill();
   ctx.restore();
 }
 
-// -- Helper: Draw Stop Light --
+// Stop lights and signs
 function drawTrafficLight(x, y, color) {
   ctx.save();
-  ctx.fillStyle="#444"; ctx.fillRect(x-12,y-24,28,60);
+  ctx.fillStyle="#444"; ctx.fillRect(x-10,y-28,24,56);
   ctx.beginPath();
   ctx.arc(x+2, y-12, 8, 0, 2*Math.PI); ctx.fillStyle=color==="red"?"#db2323":"#960a0a"; ctx.fill();
-  ctx.arc(x+2, y+6, 8, 0, 2*Math.PI); ctx.fillStyle=color==="yellow"?"#ffd600":"#968300"; ctx.fill();
-  ctx.arc(x+2, y+24, 8, 0, 2*Math.PI); ctx.fillStyle=color==="green"?"#36c034":"#235d1c"; ctx.fill();
+  ctx.arc(x+2, y+8, 8, 0, 2*Math.PI); ctx.fillStyle=color==="yellow"?"#ffd600":"#968300"; ctx.fill();
+  ctx.arc(x+2, y+28, 8, 0, 2*Math.PI); ctx.fillStyle=color==="green"?"#36c034":"#235d1c"; ctx.fill();
+  ctx.restore();
+}
+function drawStopSign(x, y) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y+38, 22, 0, 2*Math.PI); ctx.fillStyle="#de2222"; ctx.fill();
+  ctx.fillStyle="#fff"; ctx.font="bold 18px Arial"; ctx.textAlign="center";
+  ctx.fillText("STOP", x, y+45);
   ctx.restore();
 }
 
-// --- Setup Level ---
+// --- Setup/Reset ---
 function setupLevel(lvl) {
-  carX=70; carY=H/2; carSpeed=0; carBlinker=null; score=score||0; run=true; waiting=false; stopType=null; wrongAction=""; timer=0; blinkerUsed=false;
+  carX=120; carY=roads[1]; carTargetLane=1; carSpeed=0; carMaxSpeed=8; carBlinker=null; score=score||0; run=true; wait=false; stopType=null; wrongAction=""; timer=0; blinkerUsed=false;
   roadItems = [
-    { type:"light", x:290, y:H/2-50, color: ["red","green","yellow"][Math.floor(Math.random()*3)] },
-    { type:"stopSign", x:510, y:H/2-50 }
+    { type:"light", x:500, y:roads[1]-70, color: ["red","green","yellow"][Math.floor(Math.random()*3)], lane:1 },
+    { type:"stopSign", x:900, y:roads[1]-70, lane:1 }
   ];
-  messageEl.textContent = "Drive! Arrow keys to move, <- or -> for blinkers before turns.";
+  messageEl.textContent = "Drive with the controls below. Stop on red or stop sign. Blinker before lane changes gets points!";
   level=lvl; levelEl.textContent=level;
 }
 
-// -- Game Loop --
+// --- Game Loop ---
 function gameLoop() {
   ctx.clearRect(0,0,W,H);
-  // Road
+  drawBackground();
+
+  // Road stripes
   ctx.save();
-  ctx.fillStyle="#5c6f76";
-  ctx.fillRect(0, H/2-44, W, 94);
-  for (let i=0;i<12;i++){
-    ctx.fillStyle="#fff";
-    ctx.fillRect(i*64+20, H/2-2, 38, 8);
+  for (let i=0; i<12;i++) {
+    ctx.fillStyle="#fff"; ctx.fillRect(i*104+30,H/2-8,70,6);
+    ctx.fillRect(i*104+30,H/2+64,70,6);
   }
   ctx.restore();
-  // Crosswalks and intersections
-  ctx.save();
-  ctx.fillStyle="#eee";
-  ctx.fillRect(280, H/2-44, 12, 94);
-  ctx.fillRect(500, H/2-44, 12, 94);
-  ctx.restore();
 
-  // Roadside items
-  for (let itm of roadItems) {
-    if (itm.type=="light") drawTrafficLight(itm.x, itm.y, itm.color);
-    if (itm.type=="stopSign") {
-      ctx.save();
-      ctx.beginPath(); ctx.arc(itm.x, itm.y+44, 20, 0, 2*Math.PI); ctx.fillStyle="#de2222"; ctx.fill();
-      ctx.fillStyle="#fff"; ctx.font="bold 16px Arial"; ctx.textAlign="center";
-      ctx.fillText("STOP", itm.x, itm.y+50);
-      ctx.restore();
-    }
+  // Stoplights/signs
+  for(let itm of roadItems){
+    if(itm.type=="light") drawTrafficLight(itm.x,itm.y,itm.color);
+    else if(itm.type=="stopSign") drawStopSign(itm.x,itm.y);
   }
 
-  // Car
-  drawCar(carX, carY, carBlinker);
+  // Car & blinker
+  drawCar(carX, carY);
+  if(carBlinker) drawBlinker(carX, carY, carBlinker);
 
-  // Movement & rules
-  if (run) {
-    if (waiting) {
-      timer++;
-      if (timer>60 && stopType=="light" && wrongAction=="") {
-        if (roadItems[0].color=="green") {
-          messageEl.textContent="Great! You drove on green.";
-          score++; scoreEl.textContent=score;
-          waiting=false;
-        } else {
-          messageEl.textContent="Oops! Wait for green.";
-          run=false;
-          restartBtn.style.display="block";
-        }
-      }
-      if (timer>60 && stopType=="stopSign" && wrongAction=="") {
-        messageEl.textContent="Nice stop at the sign!";
+  // Logic
+  if(run){
+    // Handle lane change
+    carY += (roads[carTargetLane]-carY)*0.19;
+    // Move car if gas pressed
+    if(controls.gas.pressed && carSpeed < carMaxSpeed) carSpeed += .28;
+    else if(controls.brake.pressed && carSpeed>0.5) carSpeed -= .22;
+    else carSpeed *= 0.992;
+    carX += carSpeed;
+
+    // Traffic light
+    let itm = roadItems[0];
+    if(carX > itm.x-46 && carX < itm.x+20){
+      if(itm.color !== "green" && carSpeed > 2){
+        messageEl.textContent = "Stop for the light!";
+        run=false;
+      } else if(itm.color !== "green" && carSpeed <= 2){
+        messageEl.textContent = "Great stop!";
         score++; scoreEl.textContent=score;
-        waiting=false;
-      }
-    } else {
-      carSpeed = Math.min(carSpeed+0.15, 4);
-      carX += carSpeed;
-      // Traffic light stop
-      if (carX>roadItems[0].x-32 && carX<roadItems[0].x+32 && !waiting) {
-        stopType="light";
-        if (roadItems[0].color!="green") {
-          if (carSpeed>2) {
-            messageEl.textContent="Hit the brakes! Stop for red/yellow.";
-            run=false; restartBtn.style.display="block";
-            wrongAction="ranLight";
-          } else {
-            messageEl.textContent="Good! Waiting for green...";
-            waiting=true; timer=0;
-            carSpeed=0;
-          }
-        }
-      }
-      // Stop sign
-      if (carX>roadItems[1].x-26 && carX<roadItems[1].x+20 && !waiting) {
-        stopType="stopSign";
-        if (carSpeed>1.6) {
-          messageEl.textContent="Hit the brakes! Stop at the sign.";
-          run=false; restartBtn.style.display="block";
-          wrongAction="missedStop";
-        } else {
-          messageEl.textContent="Good! Waiting a moment...";
-          waiting=true; timer=0;
-          carSpeed=0;
-        }
       }
     }
-    // End of road
-    if (carX>W-90) {
-      messageEl.textContent="Level Complete!";
+    // Stop sign
+    let stopSign = roadItems[1];
+    if(carX > stopSign.x-28 && carX < stopSign.x+24){
+      if(carSpeed>1.2){
+        messageEl.textContent = "Stop at stop sign!";
+        run=false;
+      } else {
+        messageEl.textContent = "Stopped properly!";
+        score++; scoreEl.textContent=score;
+      }
+    }
+    // Past end
+    if(carX > W-140) {
+      messageEl.textContent = "Level Complete!";
       score++; scoreEl.textContent=score;
       run=false;
-      restartBtn.style.display="block";
     }
   }
 
-  // Simple blinker check for turns (Arrow keys set status)
-  window.onkeydown = function(e){
-    if(e.key==="ArrowRight") carBlinker="right", blinkerUsed=true;
-    if(e.key==="ArrowLeft") carBlinker="left", blinkerUsed=true;
-    if(e.key==="ArrowUp"||e.key==="ArrowDown") carBlinker=null;
-  };
-
+  // Loop
   if(run) requestAnimationFrame(gameLoop);
 }
 
-// -- Restart/Next Level --
-function resetGame() {
-  setupLevel((level||1)+1);
-  scoreEl.textContent=score;
-  restartBtn.style.display="none";
-  gameLoop();
+// --- Button handlers ---
+for(let key in controls){
+  controls[key].pressed=false;
+  controls[key].addEventListener("mousedown", ()=>{ controls[key].pressed=true; if(key==="left" && carTargetLane>0){carTargetLane--;}; if(key==="right" && carTargetLane<2){carTargetLane++;}; if(key==="blinkerLeft")carBlinker="left"; if(key==="blinkerRight")carBlinker="right"; });
+  controls[key].addEventListener("mouseup", ()=>{ controls[key].pressed=false; if(key==="gas"||key==="brake") /*do nothing*/; });
+  controls[key].addEventListener("mouseleave", ()=>{ controls[key].pressed=false; });
+  controls[key].addEventListener("touchstart", e=>{controls[key].pressed=true; e.preventDefault(); if(key==="left" && carTargetLane>0){carTargetLane--;}; if(key==="right" && carTargetLane<2){carTargetLane++;}; if(key==="blinkerLeft")carBlinker="left"; if(key==="blinkerRight")carBlinker="right";});
+  controls[key].addEventListener("touchend", e=>{controls[key].pressed=false; e.preventDefault();});
 }
-restartBtn.onclick = resetGame;
+document.body.onmouseup = document.body.ontouchend = ()=>{for(let key in controls) controls[key].pressed=false;};
+document.body.onkeydown = function(e){
+  if(e.key==="ArrowLeft"&&carTargetLane>0){ carTargetLane--; }
+  if(e.key==="ArrowRight"&&carTargetLane<2){ carTargetLane++; }
+  if(e.key==="z") carBlinker="left";
+  if(e.key==="x") carBlinker="right";
+  if(e.key==="w") controls.gas.pressed = true;
+  if(e.key==="s") controls.brake.pressed = true;
+};
+document.body.onkeyup = function(e){
+  if(e.key==="w") controls.gas.pressed = false;
+  if(e.key==="s") controls.brake.pressed = false;
+};
 
-// -- Start!
+restartBtn.onclick = ()=>{
+  setupLevel(level+1);
+  scoreEl.textContent = score;
+  messageEl.textContent = "Drive with the controls below. Stop on red or stop sign. Blinker before lane changes gets points!";
+  gameLoop();
+};
+
+// --- Init ---
 setupLevel(1);
 gameLoop();
 </script>
